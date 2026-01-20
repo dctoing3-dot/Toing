@@ -60,84 +60,79 @@ WORKDIR ${IRONBREW_PATH}
 # Download Complete LuaSrcDiet
 # ============================================
 RUN echo "=== Setting up LuaSrcDiet ===" && \
-    mkdir -p ${IRONBREW_PATH}/Lua/Minifier && \
-    cd ${IRONBREW_PATH}/Lua/Minifier && \
-    # Clone LuaSrcDiet dengan semua dependencies
-    git clone https://github.com/jirutka/luasrcdiet.git temp_luasrcdiet && \
-    # Copy semua file Lua ke direktori Minifier
-    cp -r temp_luasrcdiet/luasrcdiet/* . 2>/dev/null || true && \
-    cp temp_luasrcdiet/*.lua . 2>/dev/null || true && \
-    # Jika struktur berbeda, coba cara lain
-    find temp_luasrcdiet -name "*.lua" -exec cp {} . \; 2>/dev/null || true && \
-    rm -rf temp_luasrcdiet && \
-    # List hasil
-    echo "=== Files in Minifier ===" && \
+    mkdir -p ${IRONBREW_PATH}/Lua/Minifier
+
+# Clone LuaSrcDiet dari jirutka
+RUN cd ${IRONBREW_PATH}/Lua/Minifier && \
+    git clone https://github.com/jirutka/luasrcdiet.git temp_lsd || true && \
+    if [ -d "temp_lsd/luasrcdiet" ]; then \
+        cp -r temp_lsd/luasrcdiet/* . ; \
+    elif [ -d "temp_lsd/src" ]; then \
+        cp -r temp_lsd/src/* . ; \
+    else \
+        find temp_lsd -name "*.lua" -exec cp {} . \; ; \
+    fi && \
+    rm -rf temp_lsd && \
     ls -la
 
-# Jika masih kurang, download dari LuaDist
+# Jika masih kurang, clone dari LuaDist
 RUN cd ${IRONBREW_PATH}/Lua/Minifier && \
     if [ ! -f "llex.lua" ]; then \
         echo "Downloading from LuaDist..." && \
-        git clone https://github.com/LuaDist/luasrcdiet.git temp2 && \
-        cp -r temp2/src/* . 2>/dev/null || true && \
-        cp temp2/*.lua . 2>/dev/null || true && \
+        git clone https://github.com/LuaDist/luasrcdiet.git temp2 || true && \
+        if [ -d "temp2/src" ]; then cp -r temp2/src/* . ; fi && \
         find temp2 -name "*.lua" -exec cp {} . \; 2>/dev/null || true && \
-        rm -rf temp2; \
+        rm -rf temp2 ; \
     fi && \
     ls -la
 
-# Verify semua file yang dibutuhkan ada
+# ============================================
+# Create fs.lua (filesystem module)
+# ============================================
+RUN echo '-- Simple filesystem module for LuaSrcDiet\n\
+local M = {}\n\
+\n\
+function M.read_file(path, mode)\n\
+    local f, err = io.open(path, mode or "r")\n\
+    if not f then return nil, err end\n\
+    local content = f:read("*a")\n\
+    f:close()\n\
+    return content\n\
+end\n\
+\n\
+function M.write_file(path, data, mode)\n\
+    local f, err = io.open(path, mode or "w")\n\
+    if not f then return nil, err end\n\
+    f:write(data)\n\
+    f:close()\n\
+    return true\n\
+end\n\
+\n\
+return M' > ${IRONBREW_PATH}/Lua/Minifier/fs.lua
+
+# ============================================
+# Create init.lua (luasrcdiet module)
+# ============================================
+RUN echo '-- LuaSrcDiet init module\n\
+return {\n\
+    _VERSION = "1.0.0",\n\
+    _HOMEPAGE = "https://github.com/jirutka/luasrcdiet"\n\
+}' > ${IRONBREW_PATH}/Lua/Minifier/init.lua
+
+# ============================================
+# Verify LuaSrcDiet files
+# ============================================
 RUN echo "=== Verifying LuaSrcDiet Files ===" && \
     cd ${IRONBREW_PATH}/Lua/Minifier && \
-    for file in luasrcdiet.lua llex.lua lparser.lua optlex.lua optparser.lua; do \
+    ls -la && \
+    echo "--- Checking required files ---" && \
+    for file in luasrcdiet.lua llex.lua lparser.lua optlex.lua optparser.lua fs.lua init.lua; do \
         if [ -f "$file" ]; then \
-            echo "✅ $file exists"; \
+            echo "OK: $file" ; \
         else \
-            echo "❌ $file MISSING"; \
-        fi; \
+            echo "MISSING: $file" ; \
+        fi ; \
     done
-
-# ============================================
-# Create init.lua and fs.lua if missing
-# ============================================
-RUN cd ${IRONBREW_PATH}/Lua/Minifier && \
-    # Create fs.lua if missing
-    if [ ! -f "fs.lua" ]; then \
-        echo 'Creating fs.lua...' && \
-        cat > fs.lua << 'FSEOF'
--- Simple filesystem module for LuaSrcDiet
-local M = {}
-
-function M.read_file(path, mode)
-    local f, err = io.open(path, mode or "r")
-    if not f then return nil, err end
-    local content = f:read("*a")
-    f:close()
-    return content
-end
-
-function M.write_file(path, data, mode)
-    local f, err = io.open(path, mode or "w")
-    if not f then return nil, err end
-    f:write(data)
-    f:close()
-    return true
-end
-
-return M
-FSEOF
-    fi && \
-    # Create init.lua if missing (luasrcdiet module)
-    if [ ! -f "init.lua" ]; then \
-        echo 'Creating init.lua...' && \
-        cat > init.lua << 'INITEOF'
--- LuaSrcDiet init module
-return {
-    _VERSION = "1.0.0",
-    _HOMEPAGE = "https://github.com/jirutka/luasrcdiet"
-}
-INITEOF
-    fi
 
 # ============================================
 # Build Ironbrew 2
@@ -149,16 +144,14 @@ RUN dotnet build "IronBrew2 CLI/IronBrew2 CLI.csproj" -c Debug -o ${IRONBREW_PAT
 RUN echo "=== Build Complete ===" && ls -la ${IRONBREW_PATH}/publish/
 
 # ============================================
-# Test Ironbrew 2
+# Test Ironbrew 2 (optional debug)
 # ============================================
 RUN echo "=== Testing Ironbrew 2 ===" && \
-    echo 'print("Hello World")' > /tmp/test.lua && \
+    echo 'print("Hello")' > /tmp/test.lua && \
     cd ${IRONBREW_PATH}/publish && \
-    timeout 60 dotnet "IronBrew2 CLI.dll" /tmp/test.lua 2>&1 || echo "Test completed" && \
-    echo "=== Checking for output ===" && \
-    ls -la ${IRONBREW_PATH}/publish/*.lua 2>/dev/null || echo "No .lua files" && \
-    ls -la ${IRONBREW_PATH}/*.lua 2>/dev/null || echo "No .lua in root" && \
-    cat ${IRONBREW_PATH}/publish/out.lua 2>/dev/null | head -20 || echo "No out.lua found"
+    timeout 30 dotnet "IronBrew2 CLI.dll" /tmp/test.lua 2>&1 || echo "Test done" && \
+    ls -la *.lua 2>/dev/null || echo "No output lua files" && \
+    rm -f /tmp/test.lua
 
 # ============================================
 # Setup Discord Bot
