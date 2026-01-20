@@ -1,127 +1,160 @@
+"""
+Ironbrew 2 Obfuscator Module
+Handles Lua file obfuscation using Ironbrew 2 CLI
+"""
+
 import asyncio
 import os
 import uuid
 import io
+import shutil
 import glob
 
-# Auto-detect DLL path
-def find_ironbrew_dll():
-    """Find Ironbrew DLL automatically"""
-    possible_paths = [
-        '/opt/ironbrew-2/publish/IronBrew2.CLI.dll',
-        '/opt/ironbrew-2/publish/IronBrew2 CLI.dll',
-        '/opt/ironbrew-2/publish/IronBrew2.dll',
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
-    
-    # Search for any DLL
-    dlls = glob.glob('/opt/ironbrew-2/publish/*.dll')
-    cli_dlls = [d for d in dlls if 'cli' in d.lower() or 'ironbrew' in d.lower()]
-    
-    if cli_dlls:
-        return cli_dlls[0]
-    
-    return os.getenv('IRONBREW_DLL', '/opt/ironbrew-2/publish/IronBrew2.CLI.dll')
-
-IRONBREW_DLL = find_ironbrew_dll()
+# Path ke Ironbrew 2 CLI DLL
+IRONBREW_CLI_DLL = os.getenv('IRONBREW_CLI_DLL', '/opt/ironbrew-2/publish/IronBrew2 CLI.dll')
 TEMP_DIR = '/app/temp'
 
-print(f"Using Ironbrew DLL: {IRONBREW_DLL}")
+# Startup check
+print(f"[Obfuscator] DLL Path: {IRONBREW_CLI_DLL}")
+print(f"[Obfuscator] DLL Exists: {os.path.exists(IRONBREW_CLI_DLL)}")
+
+# List semua file di publish folder
+if os.path.exists('/opt/ironbrew-2/publish'):
+    print(f"[Obfuscator] Available files: {os.listdir('/opt/ironbrew-2/publish')}")
+
 
 async def obfuscate_lua(lua_content: str, filename: str) -> tuple:
     """
     Obfuscate Lua content menggunakan Ironbrew 2
     
+    Args:
+        lua_content: Isi file Lua
+        filename: Nama file asli
+        
     Returns:
         tuple: (result_io, success, error_message)
     """
     
     unique_id = str(uuid.uuid4())[:8]
-    input_path = os.path.join(TEMP_DIR, f"{unique_id}_{filename}")
+    work_dir = os.path.join(TEMP_DIR, unique_id)
     
     try:
-        # Ensure temp directory exists
-        os.makedirs(TEMP_DIR, exist_ok=True)
+        # Buat direktori kerja
+        os.makedirs(work_dir, exist_ok=True)
         
-        # Write input file
+        # Simpan file input
+        input_filename = filename.replace(' ', '_')  # Hindari spasi di nama file
+        input_path = os.path.join(work_dir, input_filename)
+        
         with open(input_path, 'w', encoding='utf-8') as f:
             f.write(lua_content)
         
-        # Run Ironbrew 2
-        process = await asyncio.create_subprocess_exec(
-            'dotnet', IRONBREW_DLL, input_path,
+        print(f"[Obfuscator] Input file: {input_path}")
+        print(f"[Obfuscator] Content length: {len(lua_content)} chars")
+        
+        # Jalankan Ironbrew 2 CLI
+        cmd = f'dotnet "{IRONBREW_CLI_DLL}" "{input_path}"'
+        print(f"[Obfuscator] Running: {cmd}")
+        
+        process = await asyncio.create_subprocess_shell(
+            cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=os.path.dirname(input_path)
+            cwd=work_dir
         )
         
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), 
-            timeout=120.0  # 2 minute timeout
-        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), 
+                timeout=120.0
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            return (None, False, "⏱️ Timeout: Process took too long (>120 seconds)")
         
         stdout_text = stdout.decode('utf-8', errors='ignore') if stdout else ""
         stderr_text = stderr.decode('utf-8', errors='ignore') if stderr else ""
         
-        print(f"STDOUT: {stdout_text[:500]}")
-        print(f"STDERR: {stderr_text[:500]}")
+        print(f"[Obfuscator] Return code: {process.returncode}")
+        print(f"[Obfuscator] STDOUT length: {len(stdout_text)}")
+        print(f"[Obfuscator] STDERR: {stderr_text[:500] if stderr_text else 'None'}")
         
-        # Check for output files
-        possible_outputs = [
-            input_path.replace('.lua', '.obfuscated.lua'),
-            input_path.replace('.lua', '_obfuscated.lua'),
-            os.path.join(os.path.dirname(input_path), 'output.lua'),
-            os.path.join(os.path.dirname(input_path), 'Obfuscated.lua'),
-        ]
-        
-        # Also check if original file was modified
+        # Cari hasil obfuscation
         result_content = None
         
-        # Check each possible output
-        for out_path in possible_outputs:
-            if os.path.exists(out_path):
-                with open(out_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                    if content and len(content) > 10:
-                        result_content = content
-                        # Cleanup output file
-                        try:
-                            os.remove(out_path)
-                        except:
-                            pass
-                        break
+        # List semua file di work_dir
+        all_files = os.listdir(work_dir)
+        lua_files = [f for f in all_files if f.endswith('.lua')]
+        print(f"[Obfuscator] Files in work_dir: {all_files}")
         
-        # Check if stdout contains obfuscated code
+        # Cek file-file yang mungkin jadi output
+        for lua_file in lua_files:
+            file_path = os.path.join(work_dir, lua_file)
+            
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Jika bukan file input, atau kontennya berbeda = hasil obfuscation
+            if lua_file != input_filename or content != lua_content:
+                if len(content) > 50:  # Pastikan tidak kosong
+                    result_content = content
+                    print(f"[Obfuscator] Found result in: {lua_file}")
+                    break
+        
+        # Jika tidak ada file output, cek stdout
         if not result_content and stdout_text:
-            # Ironbrew mungkin output ke stdout
-            if 'local' in stdout_text or 'function' in stdout_text or 'return' in stdout_text:
+            # Cek apakah stdout berisi Lua code
+            lua_keywords = ['local', 'function', 'return', 'end', 'if', 'then', 'for', 'while']
+            if any(kw in stdout_text for kw in lua_keywords):
                 result_content = stdout_text
+                print("[Obfuscator] Using stdout as result")
         
-        # Check if input file was modified (some obfuscators do this)
-        if not result_content and os.path.exists(input_path):
+        # Jika masih tidak ada, cek apakah file input berubah
+        if not result_content:
             with open(input_path, 'r', encoding='utf-8', errors='ignore') as f:
-                new_content = f.read()
-                if new_content != lua_content and len(new_content) > len(lua_content) * 0.5:
-                    result_content = new_content
+                current_content = f.read()
+            
+            if current_content != lua_content and len(current_content) > 50:
+                result_content = current_content
+                print("[Obfuscator] Input file was modified")
         
+        # Return hasil
         if result_content:
             result_io = io.BytesIO(result_content.encode('utf-8'))
             return (result_io, True, None)
         else:
-            error_msg = stderr_text if stderr_text else "No output generated"
+            error_msg = stderr_text if stderr_text else f"No output generated (exit code: {process.returncode})"
             return (None, False, error_msg)
             
-    except asyncio.TimeoutError:
-        return (None, False, "Timeout: Process took too long (>120 seconds)")
     except Exception as e:
-        return (None, False, str(e))
+        import traceback
+        traceback.print_exc()
+        return (None, False, f"Error: {str(e)}")
+        
     finally:
         # Cleanup
         try:
-            if os.path.exists(input_path):
-                os.remove(input_path)
+            if os.path.exists(work_dir):
+                shutil.rmtree(work_dir, ignore_errors=True)
         except:
+            pass
+
+
+async def test_obfuscator():
+    """Test function untuk verify obfuscator berjalan"""
+    test_lua = """
+local function hello()
+    print("Hello World!")
+end
+hello()
+"""
+    result, success, error = await obfuscate_lua(test_lua, "test.lua")
+    
+    if success:
+        content = result.read().decode('utf-8')
+        print(f"[Test] Success! Output length: {len(content)}")
+        return True
+    else:
+        print(f"[Test] Failed: {error}")
+        return False        except:
             pass
