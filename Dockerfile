@@ -27,6 +27,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# ... (sama seperti sebelumnya sampai build)
+
+# ============================================
+# Test Ironbrew 2 CLI
+# ============================================
+RUN echo 'print("test")' > /tmp/test.lua && \
+    dotnet "/opt/ironbrew-2/publish/IronBrew2 CLI.dll" /tmp/test.lua > /tmp/test_output.txt 2>&1 || true && \
+    echo "=== CLI Test Output ===" && \
+    cat /tmp/test_output.txt && \
+    echo "=== Output Length ===" && \
+    wc -c /tmp/test_output.txt && \
+    rm -f /tmp/test.lua /tmp/test_output.txt
+
+# ... (lanjutan sama)
 # ============================================
 # Install Lua 5.1
 # ============================================
