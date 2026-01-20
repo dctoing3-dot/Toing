@@ -2,21 +2,19 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
 venv/
-ENV/
+*.so
 
 # Environment
 .env
-.env.local
+.env.*
 *.env
 
-# Temp files
+# Temp
 temp/
 *.tmp
-input/*.lua
-output/*.lua
+*.log
 
 # IDE
 .vscode/
@@ -26,6 +24,6 @@ output/*.lua
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-logs/
+# Test files
+*.lua
+!example.lua
