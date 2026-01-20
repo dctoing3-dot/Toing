@@ -1,29 +1,8 @@
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-.Python
-venv/
-*.so
-
-# Environment
 .env
-.env.*
 *.env
-
-# Temp
 temp/
-*.tmp
 *.log
-
-# IDE
 .vscode/
 .idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Test files
-*.lua
-!example.lua
