@@ -1,14 +1,9 @@
 # ============================================
-# Ironbrew 2 Discord Bot
-# .NET Core 3.1 + Lua 5.1 + Python Discord Bot
+# Ironbrew 2 Discord Bot - Alternative Build
 # ============================================
 
 FROM mcr.microsoft.com/dotnet/sdk:3.1-focal
 
-LABEL maintainer="your-email@example.com"
-LABEL description="Ironbrew 2 Discord Bot"
-
-# Environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV IRONBREW_PATH=/opt/ironbrew-2
@@ -32,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Lua 5.1
 # ============================================
 RUN cd /tmp && \
-    wget http://www.lua.org/ftp/lua-5.1.5.tar.gz && \
+    wget https://www.lua.org/ftp/lua-5.1.5.tar.gz && \
     tar -xzf lua-5.1.5.tar.gz && \
     cd lua-5.1.5 && \
     make linux && \
@@ -40,39 +35,59 @@ RUN cd /tmp && \
     cd / && \
     rm -rf /tmp/lua-5.1.5*
 
-# Verify Lua
 RUN lua -v
 
 # ============================================
-# Clone & Build Ironbrew 2
+# Clone Ironbrew 2
 # ============================================
 RUN git clone https://github.com/Trollicus/ironbrew-2.git ${IRONBREW_PATH}
 
 WORKDIR ${IRONBREW_PATH}
 
-RUN dotnet restore && \
-    dotnet build -c Release && \
-    dotnet publish -c Release -o /opt/ironbrew-2/publish
+# ============================================
+# Debug: List available configurations
+# ============================================
+RUN echo "=== Solution Content ===" && \
+    cat IronBrew2_Core.sln | grep -A5 "GlobalSection(SolutionConfigurationPlatforms)" || true
+
+RUN echo "=== Project files ===" && \
+    find . -name "*.csproj" -exec echo "Found: {}" \;
+
+# ============================================
+# Build Ironbrew 2
+# Try multiple approaches
+# ============================================
+
+# Approach 1: Build specific project dengan Debug
+RUN dotnet restore "IronBrew2 CLI/IronBrew2 CLI.csproj" || true
+
+RUN dotnet build "IronBrew2 CLI/IronBrew2 CLI.csproj" -c Debug -o /opt/ironbrew-2/publish || \
+    dotnet build "IronBrew2 CLI/IronBrew2 CLI.csproj" -o /opt/ironbrew-2/publish || \
+    (echo "Trying solution build..." && dotnet build -c Debug -o /opt/ironbrew-2/publish)
+
+# Verify output
+RUN echo "=== Published Files ===" && \
+    ls -la /opt/ironbrew-2/publish/
+
+# Find the actual DLL name
+RUN echo "=== DLL Files ===" && \
+    find /opt/ironbrew-2/publish -name "*.dll" -type f
 
 # ============================================
 # Setup Discord Bot
 # ============================================
 WORKDIR /app
 
-# Copy bot files
 COPY bot/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY bot/ .
 
-# Create directories
 RUN mkdir -p /app/input /app/output /app/temp
 
-# Make ironbrew accessible
-ENV IRONBREW_DLL=/opt/ironbrew-2/publish/IronBrew2.dll
+# Set DLL path - akan di-update setelah tahu nama exact
+ENV IRONBREW_DLL=/opt/ironbrew-2/publish/IronBrew2.CLI.dll
 
-# Expose port (Render membutuhkan ini)
 EXPOSE 10000
 
-# Start bot
 CMD ["python3", "main.py"]
