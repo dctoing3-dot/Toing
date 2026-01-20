@@ -1,25 +1,17 @@
 services:
   - type: web
-    name: ironbrew2-discord-bot
+    name: ironbrew2-bot
     env: docker
     dockerfilePath: ./Dockerfile
-    region: singapore  # atau oregon, frankfurt
-    plan: starter  # atau free (dengan limitasi)
+    region: singapore
+    plan: starter
     
-    # Health check
     healthCheckPath: /health
     
-    # Environment Variables
     envVars:
       - key: DISCORD_TOKEN
-        sync: false  # Set manual di Render Dashboard
+        sync: false
       - key: BOT_PREFIX
         value: "!"
       - key: PORT
         value: "10000"
-      - key: PYTHONUNBUFFERED
-        value: "1"
-    
-    # Build settings
-    buildCommand: ""
-    startCommand: ""
